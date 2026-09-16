@@ -1,0 +1,268 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { generateTypes } from '../generateTypes';
+
+const sampleScan = {
+  exports: {
+    records: [
+      {
+        name: 'Options',
+        file: '/pkg/ios/Demo.swift',
+        properties: [
+          {
+            name: 'quality',
+            type: { kind: 'primitive', name: 'Double', typeof: 'number' },
+            optional: false,
+            required: false,
+          },
+        ],
+      },
+    ],
+    sharedObjects: [
+      {
+        name: 'VideoPlayer',
+        jsName: 'Player',
+        file: '/pkg/ios/Demo.swift',
+        constructorParameters: [
+          {
+            label: 'options',
+            name: 'options',
+            type: { kind: 'ref', name: 'Options', typeof: 'object' },
+            optional: false,
+          },
+        ],
+        functions: [],
+        properties: [],
+      },
+    ],
+    modules: [
+      {
+        name: 'MyModule',
+        jsName: 'MyModule',
+        file: '/pkg/ios/Demo.swift',
+        functions: [],
+        properties: [
+          {
+            name: 'status',
+            jsName: 'status',
+            type: { kind: 'ref', name: 'PlaybackStatus', typeof: 'object' },
+            readonly: true,
+            static: false,
+          },
+        ],
+      },
+    ],
+  },
+  stats: { durationMs: 1.5, filesParsed: 1, filesScanned: 3 },
+};
+
+const emptyScan = {
+  exports: { records: [], sharedObjects: [], modules: [] },
+  stats: { durationMs: 0.5, filesParsed: 0, filesScanned: 0 },
+};
+
+type FakeScanner = { stdout?: string; stderr?: string; exitCode?: number };
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-modules-cli-'));
+});
+
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+/**
+ * Writes an executable Node script standing in for the Swift scanner. It records its arguments to
+ * `args.json` next to itself, then prints the given output and exits with the given code.
+ */
+function writeFakeScanner({ stdout = '', stderr = '', exitCode = 0 }: FakeScanner): string {
+  const scannerPath = path.join(tmpDir, 'fake-scanner');
+  const argsPath = path.join(tmpDir, 'args.json');
+  fs.writeFileSync(
+    scannerPath,
+    [
+      '#!/usr/bin/env node',
+      `require('fs').writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(process.argv.slice(2)));`,
+      `process.stdout.write(${JSON.stringify(stdout)});`,
+      `process.stderr.write(${JSON.stringify(stderr)});`,
+      `process.exitCode = ${exitCode};`,
+      '',
+    ].join('\n'),
+    { mode: 0o755 }
+  );
+  return scannerPath;
+}
+
+function readScannerArgs(): string[] {
+  return JSON.parse(fs.readFileSync(path.join(tmpDir, 'args.json'), 'utf8'));
+}
+
+describe(generateTypes, () => {
+  it('scans the package directory and writes one file per module, named after its JS name', async () => {
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(sampleScan) });
+    const packageDir = path.join(tmpDir, 'pkg');
+    const outDir = path.join(packageDir, 'src');
+    const outputPath = path.join(outDir, 'MyModule.types.ts');
+
+    const result = await generateTypes({ packageDir, outDir, scannerPath });
+
+    expect(readScannerArgs()).toEqual(['scan-exports', packageDir]);
+    expect(result.outputPaths).toEqual([outputPath]);
+    expect(result.counts).toEqual({ modules: 1, sharedObjects: 1, records: 1 });
+    expect(result.stats).toEqual(sampleScan.stats);
+    expect(result.warnings).toEqual([
+      {
+        file: '/pkg/ios/Demo.swift',
+        location: 'MyModule.status',
+        message: "unresolved type 'PlaybackStatus' rendered as unknown",
+      },
+    ]);
+    const source = fs.readFileSync(outputPath, 'utf8');
+    expect(source).toContain('export type Options = {');
+    expect(source).toContain('export declare class Player {');
+    expect(source).toContain('constructor(options: Options);');
+    expect(source).toContain('readonly status: unknown;');
+  });
+
+  it('accepts scanner output larger than the default child process buffer', async () => {
+    const padded = { ...sampleScan, padding: 'x'.repeat(2 * 1024 * 1024) };
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(padded) });
+    const packageDir = path.join(tmpDir, 'pkg');
+
+    const result = await generateTypes({
+      packageDir,
+      outDir: path.join(packageDir, 'src'),
+      scannerPath,
+    });
+
+    expect(result.outputPaths).toHaveLength(1);
+  });
+
+  it('removes stale generated files and keeps hand-written ones', async () => {
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(sampleScan) });
+    const packageDir = path.join(tmpDir, 'pkg');
+    const outDir = path.join(packageDir, 'src');
+    fs.mkdirSync(outDir, { recursive: true });
+    const stalePath = path.join(outDir, 'OldModule.types.ts');
+    const handWrittenPath = path.join(outDir, 'Video.types.ts');
+    fs.writeFileSync(
+      stalePath,
+      '// @generated by @expo/modules-cli. Do not edit by hand.\nexport type Gone = 1;\n'
+    );
+    fs.writeFileSync(handWrittenPath, 'export type Mine = 1;\n');
+
+    const result = await generateTypes({ packageDir, outDir, scannerPath });
+
+    expect(result.removedPaths).toEqual([stalePath]);
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(fs.existsSync(handWrittenPath)).toBe(true);
+  });
+
+  it('warns about a module skipped for a duplicate JS name', async () => {
+    const scan = {
+      ...sampleScan,
+      exports: {
+        ...sampleScan.exports,
+        modules: [
+          { ...sampleScan.exports.modules[0], properties: [] },
+          { ...sampleScan.exports.modules[0], name: 'OtherModule', properties: [] },
+        ],
+      },
+    };
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(scan) });
+    const packageDir = path.join(tmpDir, 'pkg');
+
+    const result = await generateTypes({
+      packageDir,
+      outDir: path.join(packageDir, 'src'),
+      scannerPath,
+    });
+
+    expect(result.outputPaths).toHaveLength(1);
+    expect(result.warnings).toContainEqual({
+      file: '/pkg/ios/Demo.swift',
+      location: 'OtherModule',
+      message: "another module already uses the JS name 'MyModule', so this one was skipped",
+    });
+  });
+
+  it('writes nothing when the package exports no types', async () => {
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(emptyScan) });
+    const packageDir = path.join(tmpDir, 'pkg');
+    const outDir = path.join(packageDir, 'src');
+
+    const result = await generateTypes({ packageDir, outDir, scannerPath });
+
+    expect(result.outputPaths).toEqual([]);
+    expect(result.counts).toEqual({ modules: 0, sharedObjects: 0, records: 0 });
+    expect(fs.existsSync(outDir)).toBe(false);
+  });
+
+  it('warns about declarations no module reaches and does not write them', async () => {
+    const scan = {
+      ...sampleScan,
+      exports: {
+        ...sampleScan.exports,
+        modules: [
+          { ...sampleScan.exports.modules[0], jsName: 'A', properties: [] },
+          { ...sampleScan.exports.modules[0], name: 'B', jsName: 'B', properties: [] },
+        ],
+      },
+    };
+    const scannerPath = writeFakeScanner({ stdout: JSON.stringify(scan) });
+    const packageDir = path.join(tmpDir, 'pkg');
+    const outDir = path.join(packageDir, 'src');
+
+    const result = await generateTypes({ packageDir, outDir, scannerPath });
+
+    expect(result.outputPaths).toEqual([
+      path.join(outDir, 'A.types.ts'),
+      path.join(outDir, 'B.types.ts'),
+    ]);
+    expect(result.warnings).toEqual([
+      {
+        file: '/pkg/ios/Demo.swift',
+        location: 'VideoPlayer',
+        message: 'not reachable from any exported module, so it has no file to live in; skipped',
+      },
+      {
+        file: '/pkg/ios/Demo.swift',
+        location: 'Options',
+        message: 'not reachable from any exported module, so it has no file to live in; skipped',
+      },
+    ]);
+    expect(fs.readFileSync(path.join(outDir, 'A.types.ts'), 'utf8')).not.toContain('Player');
+  });
+
+  it('rejects with the scanner diagnostics when the scanner fails', async () => {
+    const scannerPath = writeFakeScanner({
+      stderr: "error: unknown subcommand 'scan-exports'\n",
+      exitCode: 2,
+    });
+
+    await expect(
+      generateTypes({ packageDir: tmpDir, outDir: path.join(tmpDir, 'src'), scannerPath })
+    ).rejects.toThrow("unknown subcommand 'scan-exports'");
+  });
+
+  it('explains that the scanner is a macOS binary when it cannot be executed', async () => {
+    // A directory cannot be executed on any platform: macOS reports ENOEXEC and Linux EACCES.
+    const scannerPath = tmpDir;
+
+    await expect(
+      generateTypes({ packageDir: tmpDir, outDir: path.join(tmpDir, 'src'), scannerPath })
+    ).rejects.toThrow(/macOS binary/);
+  });
+
+  it('rejects when the scanner output is not the expected JSON', async () => {
+    const scannerPath = writeFakeScanner({ stdout: 'not json' });
+
+    await expect(
+      generateTypes({ packageDir: tmpDir, outDir: path.join(tmpDir, 'src'), scannerPath })
+    ).rejects.toThrow(/not valid JSON/);
+  });
+});
