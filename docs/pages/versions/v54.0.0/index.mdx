@@ -1,4 +1,225 @@
----
+import React, { useState } from 'react';
+import {
+  SafeAreaView,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+
+export default function App() {
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      id: '1',
+      sender: 'jarvis',
+      text: 'Sistemas online, Tony. J.A.R.V.I.S. Bridge aguardando comandos.',
+    },
+  ]);
+
+  function sendMessage() {
+    if (!message.trim()) return;
+
+    const userMessage = {
+      id: Date.now().toString(),
+      sender: 'tony',
+      text: message.trim(),
+    };
+
+    setMessages((current) => [...current, userMessage]);
+    setMessage('');
+
+    setTimeout(() => {
+      const jarvisMessage = {
+        id: (Date.now() + 1).toString(),
+        sender: 'jarvis',
+        text: 'Comando recebido. Meu núcleo de inteligência ainda está sendo conectado.',
+      };
+
+      setMessages((current) => [...current, jarvisMessage]);
+    }, 700);
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+
+        <View style={styles.header}>
+          <View style={styles.statusLight} />
+
+          <View>
+            <Text style={styles.title}>J.A.R.V.I.S.</Text>
+            <Text style={styles.subtitle}>BRIDGE • ONLINE</Text>
+          </View>
+        </View>
+
+        <FlatList
+          data={messages}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.chat}
+          renderItem={({ item }) => (
+            <View
+              style={[
+                styles.message,
+                item.sender === 'tony'
+                  ? styles.tonyMessage
+                  : styles.jarvisMessage,
+              ]}
+            >
+              <Text style={styles.sender}>
+                {item.sender === 'tony' ? 'TONY' : 'J.A.R.V.I.S.'}
+              </Text>
+
+              <Text style={styles.messageText}>
+                {item.text}
+              </Text>
+            </View>
+          )}
+        />
+
+        <View style={styles.inputArea}>
+          <TextInput
+            value={message}
+            onChangeText={setMessage}
+            placeholder="Digite um comando..."
+            placeholderTextColor="#777"
+            style={styles.input}
+            onSubmitEditing={sendMessage}
+          />
+
+          <TouchableOpacity
+            style={styles.button}
+            onPress={sendMessage}
+          >
+            <Text style={styles.buttonText}>➤</Text>
+          </TouchableOpacity>
+        </View>
+
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#05070a',
+  },
+
+  header: {
+    height: 80,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1d252d',
+  },
+
+  statusLight: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#00ff88',
+    marginRight: 12,
+  },
+
+  title: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+
+  subtitle: {
+    color: '#00ff88',
+    fontSize: 11,
+    marginTop: 3,
+    letterSpacing: 2,
+  },
+
+  chat: {
+    padding: 16,
+    paddingBottom: 20,
+  },
+
+  message: {
+    maxWidth: '85%',
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 12,
+  },
+
+  tonyMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#17212b',
+    borderBottomRightRadius: 4,
+  },
+
+  jarvisMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#10161c',
+    borderWidth: 1,
+    borderColor: '#26323c',
+    borderBottomLeftRadius: 4,
+  },
+
+  sender: {
+    color: '#00ff88',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+
+  messageText: {
+    color: '#eeeeee',
+    fontSize: 16,
+    lineHeight: 23,
+  },
+
+  inputArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1d252d',
+  },
+
+  input: {
+    flex: 1,
+    height: 50,
+    backgroundColor: '#101419',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#26323c',
+  },
+
+  button: {
+    width: 50,
+    height: 50,
+    marginLeft: 8,
+    borderRadius: 25,
+    backgroundColor: '#00ff88',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  buttonText: {
+    fontSize: 25,
+    color: '#00150b',
+    fontWeight: '700',
+  },
+});
 title: Expo SDK reference
 description: Access device and system functionality in your Expo and React Native apps using Expo SDK packages.
 hideTOC: true
