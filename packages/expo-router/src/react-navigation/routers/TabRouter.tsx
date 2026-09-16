@@ -12,6 +12,7 @@ import type {
   ParamListBase,
   Route,
   Router,
+  RouterBrowserHistoryAction,
 } from './types';
 
 export type TabActionType =
@@ -312,6 +313,31 @@ export function TabRouter({
   TabNavigationState<ParamListBase>,
   TabActionType | CommonNavigationAction
 > {
+  const getBrowserHistory = (
+    previous: TabNavigationState<ParamListBase>,
+    next: TabNavigationState<ParamListBase>,
+    forward: boolean
+  ): RouterBrowserHistoryAction | undefined => {
+    if (
+      forward &&
+      (backBehavior === 'history' || backBehavior === 'fullHistory') &&
+      previous.routes[previous.index]?.key !== next.routes[next.index]?.key
+    ) {
+      return { type: 'push' };
+    }
+    const state = ensureStateHistory(previous, backBehavior, initialRouteName);
+    const delta = (next.history?.length ?? 0) - state.history.length;
+    return delta > 0
+      ? { type: 'push' }
+      : delta < 0
+        ? {
+            type: 'pop',
+            count: -delta,
+            target: { navigatorKey: next.key, routeKey: next.routes[next.index]!.key },
+          }
+        : undefined;
+  };
+
   // TODO: Simplify the action handling in this router.
   const router: Router<
     TabNavigationState<ParamListBase>,
@@ -320,6 +346,8 @@ export function TabRouter({
     ...BaseRouter,
 
     type: 'tab',
+
+    getBrowserHistoryForRouteFocus: (previous, next) => getBrowserHistory(previous, next, true),
 
     getStateForRouteFocus(inputState, key) {
       const state = ensureStateType(
@@ -761,7 +789,17 @@ export function TabRouter({
       }
 
       const normalizedState = clearFocusedPreloadedRoute(result.state);
-      return normalizedState === result.state ? result : { ...result, state: normalizedState };
+      let browserHistory: RouterBrowserHistoryAction | undefined;
+      switch (action.type) {
+        case 'PUSH':
+        case 'NAVIGATE':
+        case 'JUMP_TO':
+        case 'GO_BACK': {
+          browserHistory = getBrowserHistory(state, normalizedState, action.type !== 'GO_BACK');
+          break;
+        }
+      }
+      return { ...result, state: normalizedState, ...(browserHistory && { browserHistory }) };
     },
   };
 
