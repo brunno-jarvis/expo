@@ -3970,6 +3970,9 @@ importers:
 
   packages/expo-application:
     devDependencies:
+      '@expo/modules-cli':
+        specifier: workspace:*
+        version: link:../expo-modules-cli
       expo:
         specifier: workspace:*
         version: link:../expo
@@ -4476,6 +4479,9 @@ importers:
 
   packages/expo-crypto:
     devDependencies:
+      '@expo/modules-cli':
+        specifier: workspace:*
+        version: link:../expo-modules-cli
       expo:
         specifier: workspace:*
         version: link:../expo
@@ -4851,6 +4857,9 @@ importers:
 
   packages/expo-haptics:
     devDependencies:
+      '@expo/modules-cli':
+        specifier: workspace:*
+        version: link:../expo-modules-cli
       expo:
         specifier: workspace:*
         version: link:../expo
